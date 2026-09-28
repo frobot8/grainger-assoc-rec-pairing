@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+#MISE description="Build and verify the complete local stack"
+#MISE depends=["pull"]
+# shellcheck shell=bash
+set -euo pipefail
+
+readonly COMPOSE_FILE="${MISE_PROJECT_ROOT}/compose.yaml"
+readonly COMPOSE_PROJECT="inventory-event-platform-smoke"
+export KAFKA_HOST_PORT="${KAFKA_HOST_PORT:-19092}"
+export MONGO_HOST_PORT="${MONGO_HOST_PORT:-27018}"
+export SEAWEEDFS_S3_HOST_PORT="${SEAWEEDFS_S3_HOST_PORT:-19000}"
+export STREAM_HOST_PORT="${STREAM_HOST_PORT:-18080}"
+export STATE_HOST_PORT="${STATE_HOST_PORT:-18081}"
+export LAKE_HOST_PORT="${LAKE_HOST_PORT:-18082}"
+export LEGACY_HOST_PORT="${LEGACY_HOST_PORT:-18083}"
+readonly EVENT_TOPIC="inventory-events"
+readonly EVENT_KEY="FAC-01:SKU-1000"
+readonly EXPECTED_QUANTITY="-5"
+readonly BUCKET="inventory-lake"
+readonly OBJECT_KEY="raw-inventory/year=2024/month=01/day=15/5b1f4a2e-6c8a-4f8b-9a3e-1d2c3b4a5f60.json"
+readonly EVENT_JSON='{"type":"inventory.delta.v1","eventId":"5b1f4a2e-6c8a-4f8b-9a3e-1d2c3b4a5f60","sku":"SKU-1000","facilityId":"FAC-01","eventTime":"2024-01-15T08:30:00Z","sequence":42,"quantityDelta":-5}'
+
+compose() {
+  docker compose --project-name "${COMPOSE_PROJECT}" --file "${COMPOSE_FILE}" "$@"
+}
+
+cleanup() {
+  compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+}
+
+on_exit() {
+  local status="$?"
+  trap - EXIT
+  if ((status != 0)); then
+    echo "Smoke failed; final Compose state and service logs follow." >&2
+    compose ps >&2 || true
+    compose logs --no-color --tail 200 \
+      redpanda mongo seaweedfs inventory-stream inventory-state lake-writer legacy-consumer >&2 || true
+  fi
+  cleanup
+  exit "${status}"
+}
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+retry() {
+  local attempts="$1"
+  local delay="$2"
+  local description="$3"
+  shift 3
+
+  local attempt
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if "$@"; then
+      return 0
+    fi
+    if ((attempt < attempts)); then
+      sleep "${delay}"
+    fi
+  done
+
+  echo "Timed out waiting for ${description}." >&2
+  return 1
+}
+
+health_is_up() {
+  local port="$1"
+  curl --fail --silent --show-error "http://localhost:${port}/actuator/health" |
+    grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"'
+}
+
+topic_exists() {
+  local topic="$1"
+  compose exec -T redpanda rpk topic describe "${topic}" --brokers redpanda:9092 >/dev/null 2>&1
+}
+
+state_has_expected_quantity() {
+  curl --fail --silent --show-error \
+    "http://localhost:${STATE_HOST_PORT}/api/inventory/FAC-01/SKU-1000" |
+    grep -Eq "\"quantity\"[[:space:]]*:[[:space:]]*${EXPECTED_QUANTITY}([,}])"
+}
+
+object_exists() {
+  compose exec -T seaweedfs \
+    wget --spider -q "http://localhost:8888/buckets/${BUCKET}/${OBJECT_KEY}" \
+    >/dev/null 2>&1
+}
+
+# A smoke run always starts from empty state so its fixed event is reproducible.
+cleanup
+
+
+echo "Starting the local stack..."
+compose up --detach --pull never
+
+retry 60 2 "inventory-stream health" health_is_up "${STREAM_HOST_PORT}"
+retry 60 2 "inventory-state health" health_is_up "${STATE_HOST_PORT}"
+retry 60 2 "lake-writer health" health_is_up "${LAKE_HOST_PORT}"
+retry 60 2 "legacy-consumer health" health_is_up "${LEGACY_HOST_PORT}"
+
+for topic in inventory-events inventory-adjustments legacy-inventory-updates; do
+  retry 15 1 "Kafka topic ${topic}" topic_exists "${topic}"
+done
+
+echo "Publishing ${EVENT_KEY} to ${EVENT_TOPIC}..."
+printf '%s\n' "${EVENT_JSON}" |
+  compose exec -T redpanda rpk topic produce "${EVENT_TOPIC}" \
+    --brokers redpanda:9092 \
+    --key "${EVENT_KEY}" >/dev/null
+
+retry 60 2 "inventory state quantity ${EXPECTED_QUANTITY}" state_has_expected_quantity
+retry 60 2 "SeaweedFS object ${BUCKET}/${OBJECT_KEY}" object_exists
+
+echo "Smoke verification passed."

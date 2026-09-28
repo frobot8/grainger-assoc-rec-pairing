@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Compile and assemble all modules"
+#MISE sources=["mise.toml", "settings.gradle.kts", "build.gradle.kts", "gradle.properties", "gradle/libs.versions.toml", "*/build.gradle.kts", "*/src/main/**"]
+#MISE outputs=["event-contracts/build/libs/event-contracts-1.0.0-SNAPSHOT.jar", "integration-tests/build/libs/integration-tests-1.0.0-SNAPSHOT.jar", "inventory-state/build/libs/inventory-state.jar", "inventory-state/build/libs/inventory-state-1.0.0-SNAPSHOT-plain.jar", "inventory-stream/build/libs/inventory-stream.jar", "inventory-stream/build/libs/inventory-stream-1.0.0-SNAPSHOT-plain.jar", "lake-writer/build/libs/lake-writer.jar", "lake-writer/build/libs/lake-writer-1.0.0-SNAPSHOT-plain.jar", "legacy-consumer/build/libs/legacy-consumer.jar", "legacy-consumer/build/libs/legacy-consumer-1.0.0-SNAPSHOT-plain.jar"]
+./gradlew assemble --rerun-tasks

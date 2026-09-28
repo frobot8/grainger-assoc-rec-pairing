@@ -1,0 +1,31 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: inventory-stream
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: inventory-stream
+      auto-offset-reset: earliest
+  mongodb:
+    uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/inventory}
+    representation:
+      uuid: standard
+
+inventory:
+  state:
+    base-url: ${INVENTORY_STATE_BASE_URL:http://localhost:8081}
+  lake:
+    base-url: ${INVENTORY_LAKE_BASE_URL:http://localhost:8082}
+  stream:
+    topics:
+      events: ${INVENTORY_STREAM_TOPICS_EVENTS:inventory-events}
+      adjustments: ${INVENTORY_STREAM_TOPICS_ADJUSTMENTS:inventory-adjustments}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

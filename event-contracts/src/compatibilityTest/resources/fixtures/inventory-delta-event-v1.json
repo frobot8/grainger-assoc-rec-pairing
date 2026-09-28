@@ -1,0 +1,9 @@
+{
+  "type" : "inventory.delta.v1",
+  "eventId" : "5b1f4a2e-6c8a-4f8b-9a3e-1d2c3b4a5f60",
+  "sku" : "SKU-1000",
+  "facilityId" : "FAC-01",
+  "eventTime" : "2024-01-15T08:30:00Z",
+  "sequence" : 42,
+  "quantityDelta" : -5
+}

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Pull pinned runtime dependency images"
+#MISE depends=["images"]
+# shellcheck shell=bash
+set -euo pipefail
+
+for service in redpanda mongo seaweedfs; do
+  docker compose pull --policy missing "${service}"
+done

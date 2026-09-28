@@ -1,0 +1,172 @@
+name: inventory-event-platform
+
+networks:
+  inventory-net: {}
+
+volumes:
+  mongo-data:
+  seaweedfs-data:
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v26.2.2
+    networks:
+      - inventory-net
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:${KAFKA_HOST_PORT:-9092}
+      - --check=false
+    ports:
+      - "${KAFKA_HOST_PORT:-9092}:19092"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redpanda-init:
+    image: redpandadata/redpanda:v26.2.2
+    networks:
+      - inventory-net
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c '
+      for topic in inventory-events inventory-adjustments legacy-inventory-updates; do
+        rpk topic describe "$${topic}" --brokers redpanda:9092 >/dev/null 2>&1 ||
+        rpk topic create "$${topic}" --brokers redpanda:9092;
+      done
+      '
+
+
+  mongo:
+    image: mongo:8.3.8
+    networks:
+      - inventory-net
+    ports:
+      - "${MONGO_HOST_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.45@sha256:fc9f76fa993ad69966ffeb2f65d0318fcae39c6f8e20cf68ef7b3a5cb97769e5
+    networks:
+      - inventory-net
+    command: mini -dir=/data
+    environment:
+      AWS_ACCESS_KEY_ID: seaweedfsadmin
+      AWS_SECRET_ACCESS_KEY: seaweedfsadmin
+      S3_BUCKET: inventory-lake
+    ports:
+      - "${SEAWEEDFS_S3_HOST_PORT:-9000}:8333"
+    volumes:
+      - seaweedfs-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9333/cluster/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  inventory-state:
+    image: inventory-state:local
+    pull_policy: never
+    networks:
+      - inventory-net
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/inventory-state
+    ports:
+      - "${STATE_HOST_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  lake-writer:
+    image: lake-writer:local
+    pull_policy: never
+    networks:
+      - inventory-net
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      LAKE_S3_ENDPOINT: http://seaweedfs:8333
+      LAKE_S3_ACCESS_KEY: seaweedfsadmin
+      LAKE_S3_SECRET_KEY: seaweedfsadmin
+      LAKE_S3_REGION: us-east-1
+      LAKE_S3_BUCKET: inventory-lake
+    ports:
+      - "${LAKE_HOST_PORT:-8082}:8082"
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  inventory-stream:
+    image: inventory-stream:local
+    pull_policy: never
+    networks:
+      - inventory-net
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+      inventory-state:
+        condition: service_healthy
+      lake-writer:
+        condition: service_healthy
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/inventory
+      INVENTORY_STATE_BASE_URL: http://inventory-state:8081
+      INVENTORY_LAKE_BASE_URL: http://lake-writer:8082
+    ports:
+      - "${STREAM_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  legacy-consumer:
+    image: legacy-consumer:local
+    pull_policy: never
+    networks:
+      - inventory-net
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    ports:
+      - "${LEGACY_HOST_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8083"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s

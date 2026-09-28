@@ -1,0 +1,39 @@
+amends "package://github.com/jdx/hk/releases/download/v1.57.0/hk@1.57.0#/Config.pkl"
+
+// Install the repository hooks with `hk install`.
+local stagedKotlin = new Mapping<String, Step> {
+  ["kotlin-style"] {
+    glob = List("**/*.kt", "**/*.kts")
+    check = "./gradlew --console=plain ktlintCheck"
+    fix = "./gradlew --console=plain ktlintFormat"
+  }
+}
+
+// `check` supplies the unit, concurrency, idempotency, and retry coverage.
+// The explicitly named suites keep compatibility, integration, and replay /
+// ordering verification visible while Gradle de-duplicates their task graph.
+local fullVerification = new Mapping<String, Step> {
+  ["gradle-verification"] {
+    workspace_indicator = "settings.gradle.kts"
+    check =
+      "./gradlew --console=plain ktlintCheck check :event-contracts:compatibilityTest :integration-tests:integrationTest :integration-tests:replayTest"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = stagedKotlin
+  }
+  ["pre-push"] {
+    steps = fullVerification
+  }
+  ["fix"] {
+    fix = true
+    steps = stagedKotlin
+  }
+  ["check"] {
+    steps = fullVerification
+  }
+}

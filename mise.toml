@@ -1,0 +1,54 @@
+[tools]
+gradle = "9.7.1"
+hk = "1.57.0"
+java = "26.0.2.1"
+kotlin = "2.4.10"
+pkl = "0.32.1"
+
+
+[tasks.test]
+description = "Run the full verification suite"
+run = "./gradlew check"
+
+[tasks.images]
+description = "Build local container images"
+depends = ["build"]
+run = "./gradlew jibDockerBuild"
+
+[tasks.infra-up]
+description = "Start Redpanda, MongoDB, and SeaweedFS"
+depends = ["pull"]
+run = "docker compose up --detach --pull never redpanda redpanda-init mongo seaweedfs"
+
+[tasks.infra-down]
+description = "Stop the local infrastructure"
+run = "docker compose down"
+
+[tasks.up]
+description = "Start the complete local stack"
+depends = ["pull"]
+run = "docker compose up --detach --pull never"
+
+[tasks.down]
+description = "Stop the complete local stack"
+run = "docker compose down"
+
+[tasks.reset]
+description = "Stop the stack and remove local persistent data"
+run = "docker compose down --volumes --remove-orphans"
+
+[tasks.run-stream]
+description = "Run inventory-stream locally"
+run = "./gradlew :inventory-stream:bootRun"
+
+[tasks.run-state]
+description = "Run inventory-state locally"
+run = "./gradlew :inventory-state:bootRun"
+
+[tasks.run-lake]
+description = "Run lake-writer locally"
+run = "./gradlew :lake-writer:bootRun"
+
+[tasks.run-legacy]
+description = "Run legacy-consumer locally"
+run = "./gradlew :legacy-consumer:bootRun"

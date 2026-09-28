@@ -1,5 +1,8 @@
-# Object file
-*.o
-
-# Ada Library Information
-*.ali
+.gradle/
+.kotlin/
+**/build/
+.idea/
+*.iml
+.DS_Store
+.local/
+compose-data/

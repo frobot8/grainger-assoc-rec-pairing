@@ -1,0 +1,21 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: legacy-consumer
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: legacy-consumer
+      auto-offset-reset: earliest
+      properties:
+        isolation.level: read_committed
+    producer:
+      transaction-id-prefix: legacy-consumer-tx-
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
